@@ -20,7 +20,7 @@ int main (int argc, char** argv) {
     webcam.set(CAP_PROP_FOURCC, CV_FOURCC('Y', 'U', 'Y', 'V'));
 
 
-    // Continuously capture fames until keystroke
+    // Continuously capture fames
     while (true) {
         // Capture video frame
         Mat webcamFrame;
@@ -32,7 +32,7 @@ int main (int argc, char** argv) {
         findChessboardCorners(webcamFrame, pattern, corners, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
         + CALIB_CB_FAST_CHECK);
 
-        Scalar color = Scalar(0, 0, 255);
+        Scalar color = Scalar(0, 0, 255); // pure red
         for (auto p : corners) {
             Rect rect(p.x - 2, p.y - 2, 5, 5);
             rectangle(webcamFrame, rect, color, 2, LINE_8, 0);
@@ -40,7 +40,7 @@ int main (int argc, char** argv) {
 
         // Display Result
         imshow("Camera Output", webcamFrame);
-        if (waitKey(30) >= 0) break;
+        if (waitKey(30) >= 0) break; // break on keystroke
     }
 
     return 0;
