@@ -1,4 +1,3 @@
-// compiled with `pkg-config --libs --cflags opencv`
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
@@ -27,7 +26,7 @@ int main (int argc, char** argv) {
         webcam.read(webcamFrame);
 
         // Detect 8x8 chessboard pattern, 7x7 internal points
-        Size pattern = Size (7, 7);
+        Size pattern = Size (7, 7); 
         vector<Point2f> corners;
         findChessboardCorners(webcamFrame, pattern, corners, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
         + CALIB_CB_FAST_CHECK);
