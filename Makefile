@@ -1,5 +1,6 @@
+.PHONY: all clean
 CXX = g++
-CXXFLAGS = -Wall -std=c++0x
+CXXFLAGS = -std=c++0x -Wall
 LDLIBS = `pkg-config --libs --cflags opencv` -lm -lGL -lGLU -lglut
 
 OBJ_DIR = bin
