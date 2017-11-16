@@ -1,6 +1,6 @@
 # AR Project
 
-I'm creating an Augmented Reality application in C++ primarily using OpenCV and OpenGL...
+an Augmented Reality application in C++ primarily using OpenCV and OpenGL
 
 ## Built With
 
