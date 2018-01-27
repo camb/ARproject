@@ -26,6 +26,23 @@ using namespace glm;
 using namespace std;
 
 
+cv::Mat getWebcamStill() {
+    // read in a single webcam frame
+    VideoCapture webcam(0);
+    // Set windows resolution
+    webcam.set(CAP_PROP_FRAME_HEIGHT, 720);
+    webcam.set(CAP_PROP_FRAME_WIDTH, 1280);
+    // Set codec to YUYV to avoid MJPG corrupt JPEG warnings
+    webcam.set(CAP_PROP_FOURCC, CV_FOURCC('Y', 'U', 'Y', 'V'));
+    Mat webcamStill;
+    webcam.read(webcamStill);
+    // using that in the OpenGl window background
+    // may need to flip texture to work in OpenGL
+    // cv::flip(webcamStill, webcamStill, 0);
+    return webcamStill;
+}
+
+
 int runOpenGL() {
     // Initialise GLFW
     if( !glfwInit() )
@@ -73,12 +90,37 @@ int runOpenGL() {
     GLuint programID = LoadShaders("shaders/SimpleVertexShader.vertexshader",
                                    "shaders/SimpleFragmentShader.fragmentshader");
 
-
+    /* old
     static const GLfloat g_vertex_buffer_data[] = { 
         -1.0f, -1.0f, 0.0f,
          1.0f, -1.0f, 0.0f,
          0.0f,  1.0f, 0.0f,
     };
+    */
+    static const GLfloat g_vertex_buffer_data[] = {
+        -1.0f, 1.0f, 0.0f,
+        1.0f, 1.0f, 0.0f,
+        -1.0f, -1.0f, 0.0f,
+        // second triangle
+        -1.0f, -1.0f, 0.0f,
+        1.0f, 1.0f, 0.0f,
+        1.0f, -1.0f, 0.0f,
+    };
+
+    // random colors
+    static const GLfloat g_color_buffer_data[] = {
+        0.583f,  0.771f,  0.014f,
+        0.609f,  0.115f,  0.436f,
+        0.327f,  0.483f,  0.844f,
+        0.822f,  0.569f,  0.201f,
+        0.435f,  0.602f,  0.223f,
+        0.310f,  0.747f,  0.185f,
+    };
+
+    GLuint colorbuffer;
+    glGenBuffers(1, &colorbuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, colorbuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(g_color_buffer_data), g_color_buffer_data, GL_STATIC_DRAW);
 
     GLuint vertexbuffer;
     glGenBuffers(1, &vertexbuffer);
@@ -86,7 +128,6 @@ int runOpenGL() {
     glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), g_vertex_buffer_data, GL_STATIC_DRAW);
 
     do{
-
         // Clear the screen
         glClear( GL_COLOR_BUFFER_BIT );
 
@@ -105,10 +146,21 @@ int runOpenGL() {
             (void*)0            // array buffer offset
         );
 
-        // Draw the triangle !
-        glDrawArrays(GL_TRIANGLES, 0, 3); // 3 indices starting at 0 -> 1 triangle
+        glEnableVertexAttribArray(1);
+        glBindBuffer(GL_ARRAY_BUFFER, colorbuffer);
+        glVertexAttribPointer(
+            1,                                // attribute. No particular reason for 1, but must match the layout in the shader.
+            3,                                // size
+            GL_FLOAT,                         // type
+            GL_FALSE,                         // normalized?
+            0,                                // stride
+            (void*)0                          // array buffer offset
+        );
 
-        glDisableVertexAttribArray(0);
+        // Draw the triangle !
+        //glDrawArrays(GL_TRIANGLES, 0, 3); // 3 indices starting at 0 -> 1 triangle
+        glDrawArrays(GL_TRIANGLES, 0, 2*3); // 3 indices starting at 0 -> 1 triangle
+
 
         // Swap buffers
         glfwSwapBuffers(window);
@@ -130,9 +182,6 @@ int runOpenGL() {
 
 
 int runOpenCV() {
-        //////////////////////////////////////
-    // OpenCV Video Input Code beings here
-    //////////////////////////////////////
     VideoCapture webcam(0);
     if (!webcam.isOpened()){
         CV_Assert("webcam failed to open");
@@ -169,13 +218,12 @@ int runOpenCV() {
 
 
 int main (int argc, char** argv) {
-    cout << "Foo\n";
-    //runOpenGL();
     thread first (runOpenGL);
-    thread second (runOpenCV);
+    //thread second (runOpenCV);
+
+    // synchronize threads
     first.join();
-    second.join();
-    cout << "Bar\n";
+    //second.join();
 
     return 0;
 }

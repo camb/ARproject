@@ -1,12 +1,20 @@
 #version 330 core
 
+// Input data
+in vec3 fragmentColor;
+
 // Ouput data
 out vec3 color;
+
 
 void main()
 {
 
 	// Output color = red 
-	color = vec3(1,0,0);
+	// color = vec3(1,0,0);
+
+	// The color of each vertex will be interpolated
+    // to produce the color of each fragment
+    color = fragmentColor;
 
 }
