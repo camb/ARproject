@@ -140,9 +140,13 @@ int setupGLFWWindow() {
 
 
 void renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
-                       GLuint& Texture, GLuint& TextureID,
+                       cv::Mat& webcam_image, GLuint& TextureID,
                        GLuint& vertexbuffer, GLuint& uvbuffer,
                        glm::mat4& MVP) {
+
+    // convert webcam_image for OpenGL texture
+    GLuint Texture = cvMatToGLuint(webcam_image);
+
     // Clear the screen
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -222,10 +226,6 @@ int main (int argc, char** argv) {
     glm::mat4 Model      = glm::mat4(1.0f);
     // Our ModelViewProjection : multiplication of our 3 matrices
     glm::mat4 MVP        = Projection * View * Model; // Remember, matrix multiplication is the other way around
-
-
-    // Take webcam still and load background
-    GLuint Texture = cvMatToGLuint(getWebcamStill());
     
     // Get a handle for our "myTextureSampler" uniform
     GLuint TextureID  = glGetUniformLocation(programID, "myTextureSampler");
@@ -262,19 +262,24 @@ int main (int argc, char** argv) {
     glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), g_vertex_buffer_data, GL_STATIC_DRAW);
 
 
-    // capture a webcam frame
-    // thread 1 tracks newest webcam frame
-    // thread 2 renders previous webcam frame with overlayed 3D
-    // join threads and display previous image, repeat with newest frame
-    // capture and solve works 1 step ahead
+    
+    cv::Mat webcam_image;
+    GLuint Texture;
     do{
+        // capture a webcam frame
+        webcam_image = getWebcamStill();
+
+        // thread 1 tracks newest webcam frame
+        // thread 2 renders previous webcam frame with overlayed 3D
         renderOpenGLFrame(programID, MatrixID,
-                          Texture,TextureID,
+                          webcam_image,TextureID,
                           vertexbuffer, uvbuffer,
                           MVP);
-        //thread first (renderOpenGLFrame);
-        //thread second(trackLatestFrame);
 
+        //thread second(trackLatestFrame);
+        //thread first (renderOpenGLFrame);
+
+        // join threads and display previous image, repeat with newest frame
         // synchronize threads
         //first.join();
         //second.join();
@@ -284,9 +289,9 @@ int main (int argc, char** argv) {
            glfwWindowShouldClose(window) == 0 );
 
 
-    // Cleanup VBO
+    // Cleanup
+    glDeleteBuffers(1, &uvbuffer);
     glDeleteBuffers(1, &vertexbuffer);
-    glDeleteVertexArrays(1, &VertexArrayID);
     glDeleteProgram(programID);
     glDeleteTextures(1, &Texture);
     glDeleteVertexArrays(1, &VertexArrayID);
