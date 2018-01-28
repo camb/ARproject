@@ -12,7 +12,7 @@ SOURCE = $(wildcard $(SRC_DIR)/*.cpp main.cpp)
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(notdir $(SOURCE:.cpp=.o)))
 EXECUTABLE = main
 
-all: init $(OBJECTS) $(EXECUTABLE) clean
+all: rmbin init $(OBJECTS) $(EXECUTABLE) clean
 
 $(EXECUTABLE):
 	$(CXX) $(CXXFLAGS) $(LIB_DIR) -o $@ $(OBJECTS) $(LDLIBS)
@@ -25,3 +25,6 @@ init:
 
 clean:
 	@rm -rf $(OBJ_DIR)
+
+rmbin:
+	@rm -f ./main

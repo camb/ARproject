@@ -40,7 +40,7 @@ cv::Mat getWebcamStill() {
 }
 
 
-GLuint cvMatToGLuint(cv::Mat input_mat) {
+GLuint cvMatToGLuint(cv::Mat& input_mat) {
     GLuint textureID;
     cv::flip(input_mat, input_mat, 0);
     glGenTextures(1, &textureID);
@@ -127,10 +127,11 @@ int setupGLFWWindow() {
     // background, possibly unnecessary
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
+    // TODO reenable these when adding 3D
     // Enable depth test
-    glEnable(GL_DEPTH_TEST);
+    //glEnable(GL_DEPTH_TEST);
     // Accept fragment if it closer to the camera than the former one
-    glDepthFunc(GL_LESS);
+    //glDepthFunc(GL_LESS);
     return 0;
 }
 
@@ -159,8 +160,7 @@ int renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
     // Set our "myTextureSampler" sampler to use Texture Unit 0
     glUniform1i(TextureID, 0);
 
-
-    // 1rst attribute buffer : vertices
+    // 1st attribute buffer : vertices
     glEnableVertexAttribArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
     glVertexAttribPointer(
@@ -211,8 +211,12 @@ int main (int argc, char** argv) {
     // Get a handle for our "MVP" uniform
     GLuint MatrixID = glGetUniformLocation(programID, "MVP");
 
-    // Projection matrix : 45° Field of View, 4:3 ratio, display range : 0.1 unit <-> 100 units
-    glm::mat4 Projection = glm::perspective(glm::radians(45.0f), 4.0f / 3.0f, 0.1f, 100.0f);
+    // Old persp Projection: 45° Field of View, 4:3 ratio, dist: 0.1 to 100 units
+    //glm::mat4 Projection = glm::perspective(glm::radians(45.0f), 4.0f / 3.0f, 0.1f, 100.0f);
+
+    // ortho projection matrix for the background plate
+    glm::mat4 Projection = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, 0.1f, 100.0f);
+
     // Camera matrix
     glm::mat4 View  = glm::lookAt(
                         glm::vec3(0,0,3), // Camera is at (0,0,3), in World Space
@@ -227,6 +231,7 @@ int main (int argc, char** argv) {
     // Get a handle for our "myTextureSampler" uniform
     GLuint TextureID  = glGetUniformLocation(programID, "myTextureSampler");
 
+    // 2 triangles that makeup the background plate
     static const GLfloat g_vertex_buffer_data[] = {
         -1.0f, 1.0f, 0.0f,
         1.0f, 1.0f, 0.0f,
@@ -236,8 +241,7 @@ int main (int argc, char** argv) {
         1.0f, 1.0f, 0.0f,
         1.0f, -1.0f, 0.0f,
     };
-
-    // Two UV coordinatesfor each vertex
+    // 2 UV coordinates for each vertex
     static const GLfloat g_uv_buffer_data[] = {
         0.0f, 1.0f,
         1.0f, 1.0f,
@@ -263,27 +267,28 @@ int main (int argc, char** argv) {
     cv::Mat prev_webcam_image;
     GLuint Texture;
     do{
-        // capture a webcam image
         prev_webcam_image = cur_webcam_image;
+        // capture a new webcam image
         cur_webcam_image = getWebcamStill();
 
         // thread 1 tracks newest webcam image and outputs transforms for OpenGL
-        thread first (trackLatestImage, ref(cur_webcam_image));
+        //thread first (trackLatestImage, ref(cur_webcam_image));
 
         // thread 2 renders previous webcam image with overlayed 3D
+        // TODO fix this thread, it's seg faulting
+        // thread second (renderOpenGLFrame,
+        //                ref(programID), ref(MatrixID),
+        //                ref(prev_webcam_image), ref(TextureID),
+        //                ref(vertexbuffer), ref(uvbuffer),
+        //                ref(MVP));
         renderOpenGLFrame(programID, MatrixID,
                           prev_webcam_image, TextureID,
                           vertexbuffer, uvbuffer,
                           MVP);
-        //thread second(renderOpenGLFrame,
-                           // ref(programID), ref(MatrixID),
-                           // ref(prev_webcam_image), ref(TextureID),
-                           // ref(vertexbuffer), ref(uvbuffer),
-                           // ref(MVP));
 
         // synchronize threads, display prev image, repeat with newest image
-        first.join();
         // second.join();
+        // first.join();
 
     } // Check if the ESC key was pressed or the window was closed
     while( glfwGetKey(window, GLFW_KEY_ESCAPE ) != GLFW_PRESS &&
