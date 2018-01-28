@@ -68,28 +68,24 @@ GLuint cvMatToGLuint(cv::Mat input_mat) {
 }
 
 
-int runOpenCV() {
-    while (true) {
-        // Capture video frame
-        Mat webcamFrame;
-        webcamFrame = getWebcamStill();
+int trackLatestImage(cv::Mat& webcam_image) {
+    // Detect 8x8 chessboard pattern, 7x7 internal points
+    Size pattern = Size (7, 7); 
+    vector<Point2f> corners;
+    findChessboardCorners(webcam_image, pattern, corners, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
+    + CALIB_CB_FAST_CHECK);
 
-        // Detect 8x8 chessboard pattern, 7x7 internal points
-        Size pattern = Size (7, 7); 
-        vector<Point2f> corners;
-        findChessboardCorners(webcamFrame, pattern, corners, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
-        + CALIB_CB_FAST_CHECK);
-
-        Scalar color = Scalar(0, 0, 255); // pure red
-        for (auto p : corners) {
-            Rect rect(p.x - 2, p.y - 2, 5, 5);
-            rectangle(webcamFrame, rect, color, 2, LINE_8, 0);
-        }
-
-        // Display Result
-        //imshow("Camera Output", webcamFrame);
-        //if (waitKey(30) >= 0) break; // break on keystroke
+    Scalar color = Scalar(0, 0, 255); // pure red
+    for (auto p : corners) {
+        Rect rect(p.x - 2, p.y - 2, 5, 5);
+        rectangle(webcam_image, rect, color, 2, LINE_8, 0);
     }
+
+    // Display Result
+    //imshow("Camera Output", webcam_image);
+    //if (waitKey(30) >= 0) break; // break on keystroke
+
+    // TODO Change return type from int to solved transform matrix for OpenGL
     return 0;
 }
 
@@ -139,7 +135,7 @@ int setupGLFWWindow() {
 }
 
 
-void renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
+int renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
                        cv::Mat& webcam_image, GLuint& TextureID,
                        GLuint& vertexbuffer, GLuint& uvbuffer,
                        glm::mat4& MVP) {
@@ -197,6 +193,7 @@ void renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
     // Swap buffers
     glfwSwapBuffers(window);
     glfwPollEvents();
+    return 0;
 }
 
 
@@ -217,15 +214,15 @@ int main (int argc, char** argv) {
     // Projection matrix : 45° Field of View, 4:3 ratio, display range : 0.1 unit <-> 100 units
     glm::mat4 Projection = glm::perspective(glm::radians(45.0f), 4.0f / 3.0f, 0.1f, 100.0f);
     // Camera matrix
-    glm::mat4 View       = glm::lookAt(
-                            glm::vec3(0,0,3), // Camera is at (0,0,3), in World Space
-                            glm::vec3(0,0,0), // and looks at the origin
-                            glm::vec3(0,1,0)  // Head is up (set to 0,-1,0 to look upside-down)
-                           );
+    glm::mat4 View  = glm::lookAt(
+                        glm::vec3(0,0,3), // Camera is at (0,0,3), in World Space
+                        glm::vec3(0,0,0), // and looks at the origin
+                        glm::vec3(0,1,0)  // Head is up (set to 0,-1,0 to look upside-down)
+                      );
     // Model matrix : an identity matrix (model will be at the origin)
-    glm::mat4 Model      = glm::mat4(1.0f);
+    glm::mat4 Model = glm::mat4(1.0f);
     // Our ModelViewProjection : multiplication of our 3 matrices
-    glm::mat4 MVP        = Projection * View * Model; // Remember, matrix multiplication is the other way around
+    glm::mat4 MVP  = Projection * View * Model; // Remember, matrix multiplication is the other way around
     
     // Get a handle for our "myTextureSampler" uniform
     GLuint TextureID  = glGetUniformLocation(programID, "myTextureSampler");
@@ -241,7 +238,6 @@ int main (int argc, char** argv) {
     };
 
     // Two UV coordinatesfor each vertex
-    // TODO fix slight texture overlapping issue
     static const GLfloat g_uv_buffer_data[] = {
         0.0f, 1.0f,
         1.0f, 1.0f,
@@ -263,26 +259,31 @@ int main (int argc, char** argv) {
 
 
     
-    cv::Mat webcam_image;
+    cv::Mat cur_webcam_image = getWebcamStill();
+    cv::Mat prev_webcam_image;
     GLuint Texture;
     do{
-        // capture a webcam frame
-        webcam_image = getWebcamStill();
+        // capture a webcam image
+        prev_webcam_image = cur_webcam_image;
+        cur_webcam_image = getWebcamStill();
 
-        // thread 1 tracks newest webcam frame
-        // thread 2 renders previous webcam frame with overlayed 3D
+        // thread 1 tracks newest webcam image and outputs transforms for OpenGL
+        thread first (trackLatestImage, ref(cur_webcam_image));
+
+        // thread 2 renders previous webcam image with overlayed 3D
         renderOpenGLFrame(programID, MatrixID,
-                          webcam_image,TextureID,
+                          prev_webcam_image, TextureID,
                           vertexbuffer, uvbuffer,
                           MVP);
+        //thread second(renderOpenGLFrame,
+                           // ref(programID), ref(MatrixID),
+                           // ref(prev_webcam_image), ref(TextureID),
+                           // ref(vertexbuffer), ref(uvbuffer),
+                           // ref(MVP));
 
-        //thread second(trackLatestFrame);
-        //thread first (renderOpenGLFrame);
-
-        // join threads and display previous image, repeat with newest frame
-        // synchronize threads
-        //first.join();
-        //second.join();
+        // synchronize threads, display prev image, repeat with newest image
+        first.join();
+        // second.join();
 
     } // Check if the ESC key was pressed or the window was closed
     while( glfwGetKey(window, GLFW_KEY_ESCAPE ) != GLFW_PRESS &&
