@@ -4,25 +4,16 @@
 #include <vector>
 #include <iomanip>
 #include <thread>
-
-// OpenCV includes
 #include <opencv2/opencv.hpp>
 using namespace cv;
-
-// OpenGL includes
 #include <GL/glew.h> // include before gl.h and glfw.h
 #include <GLFW/glfw3.h>
 GLFWwindow* window;  // TODO: fix global var
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 using namespace glm;
-
 #include "shader.hpp"
 using namespace std;
-
-// TODO remove?
-// #include <GL/gl.h>
-// #include <GL/glut.h>
 
 
 cv::Mat getWebcamStill() {
@@ -127,20 +118,20 @@ int setupGLFWWindow() {
     // background, possibly unnecessary
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-    // TODO reenable these when adding 3D
     // Enable depth test
-    //glEnable(GL_DEPTH_TEST);
+    glEnable(GL_DEPTH_TEST);
     // Accept fragment if it closer to the camera than the former one
-    //glDepthFunc(GL_LESS);
+    glDepthFunc(GL_LESS);
     return 0;
 }
 
 
-int renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
+int renderOpenGLFrame(GLuint& programID, GLuint& persp_programID,
+                       GLuint& MatrixID, GLuint& persp_MatrixID,
                        cv::Mat& webcam_image, GLuint& TextureID,
                        GLuint& vertexbuffer, GLuint& uvbuffer,
-                       glm::mat4& MVP) {
-
+                       GLuint& fgbuffer,
+                       glm::mat4& ortho_MVP, glm::mat4& persp_MVP) {
     // convert webcam_image for OpenGL texture
     GLuint Texture = cvMatToGLuint(webcam_image);
 
@@ -152,7 +143,7 @@ int renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
 
     // Send our transformation to the currently bound shader, 
     // in the "MVP" uniform
-    glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP[0][0]);
+    glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &ortho_MVP[0][0]);
 
     // Bind our texture in Texture Unit 0
     glActiveTexture(GL_TEXTURE0);
@@ -171,7 +162,6 @@ int renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
         0,                  // stride
         (void*)0            // array buffer offset
     );
-
     // 2nd attribute buffer : UVs
     glEnableVertexAttribArray(1);
     glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
@@ -184,11 +174,33 @@ int renderOpenGLFrame(GLuint& programID, GLuint& MatrixID,
         (void*)0                          // array buffer offset
     );
 
-    // Draw the triangles
+    // Draw the BG triangles
     glDrawArrays(GL_TRIANGLES, 0, 2*3);
-
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
+
+
+    // Draw the FG triangle
+    // Clear the depth buffer
+    glClear(GL_DEPTH_BUFFER_BIT);
+    // Use a the FG shader
+    glUseProgram(persp_programID);
+    // Use the persp matrix
+    glUniformMatrix4fv(persp_MatrixID, 1, GL_FALSE, &persp_MVP[0][0]);
+
+    glEnableVertexAttribArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, fgbuffer);
+    glVertexAttribPointer(
+        0,                  // attribute 0. No particular reason for 0, but must match the layout in the shader.
+        3,                  // size
+        GL_FLOAT,           // type
+        GL_FALSE,           // normalized?
+        0,                  // stride
+        (void*)0            // array buffer offset
+    );
+    // Draw FG tris
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDisableVertexAttribArray(2);
 
     // Swap buffers
     glfwSwapBuffers(window);
@@ -208,38 +220,42 @@ int main (int argc, char** argv) {
     GLuint programID = LoadShaders("shaders/SimpleVertexShader.vertexshader",
                                    "shaders/SimpleFragmentShader.fragmentshader");
 
+    GLuint persp_programID = LoadShaders("shaders/SimpleVertexShader_persp.vertexshader",
+                                         "shaders/SimpleFragmentShader_persp.fragmentshader");
+
     // Get a handle for our "MVP" uniform
     GLuint MatrixID = glGetUniformLocation(programID, "MVP");
-
+    GLuint persp_MatrixID = glGetUniformLocation(persp_programID, "persp_MVP");
     // Old persp Projection: 45° Field of View, 4:3 ratio, dist: 0.1 to 100 units
-    //glm::mat4 Projection = glm::perspective(glm::radians(45.0f), 4.0f / 3.0f, 0.1f, 100.0f);
-
+    glm::mat4 persp_Projection = glm::perspective(glm::radians(45.0f), 4.0f / 3.0f, 0.1f, 100.0f);
     // ortho projection matrix for the background plate
-    glm::mat4 Projection = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, 0.1f, 100.0f);
-
+    glm::mat4 ortho_Projection = glm::ortho(-1.0f, 1.0f,    // left,   right
+                                            -1.0f, 1.0f,    // bottom, top
+                                             0.1f, 100.0f);  // near,   far
     // Camera matrix
     glm::mat4 View  = glm::lookAt(
-                        glm::vec3(0,0,3), // Camera is at (0,0,3), in World Space
+                        glm::vec3(0,0,5), // Camera is at (0,0,3), in World Space
                         glm::vec3(0,0,0), // and looks at the origin
                         glm::vec3(0,1,0)  // Head is up (set to 0,-1,0 to look upside-down)
                       );
     // Model matrix : an identity matrix (model will be at the origin)
     glm::mat4 Model = glm::mat4(1.0f);
     // Our ModelViewProjection : multiplication of our 3 matrices
-    glm::mat4 MVP  = Projection * View * Model; // Remember, matrix multiplication is the other way around
+    glm::mat4 ortho_MVP  = ortho_Projection * View * Model; // Remember, matrix multiplication is the other way around
+    glm::mat4 persp_MVP  = persp_Projection * View * Model; // Remember, matrix multiplication is the other way around
     
     // Get a handle for our "myTextureSampler" uniform
     GLuint TextureID  = glGetUniformLocation(programID, "myTextureSampler");
 
-    // 2 triangles that makeup the background plate
+    // Background plate quad of 2 triangles
     static const GLfloat g_vertex_buffer_data[] = {
-        -1.0f, 1.0f, 0.0f,
-        1.0f, 1.0f, 0.0f,
-        -1.0f, -1.0f, 0.0f,
+        -1.0f,   1.0f, 0.0f,
+         1.0f,   1.0f, 0.0f,
+        -1.0f,  -1.0f, 0.0f,
         // second triangle
-        -1.0f, -1.0f, 0.0f,
-        1.0f, 1.0f, 0.0f,
-        1.0f, -1.0f, 0.0f,
+        -1.0f,  -1.0f, 0.0f,
+         1.0f,   1.0f, 0.0f,
+         1.0f,  -1.0f, 0.0f,
     };
     // 2 UV coordinates for each vertex
     static const GLfloat g_uv_buffer_data[] = {
@@ -250,17 +266,26 @@ int main (int argc, char** argv) {
         1.0f, 1.0f,
         1.0f, 0.0f,
     };
-
     GLuint uvbuffer;
     glGenBuffers(1, &uvbuffer);
     glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(g_uv_buffer_data), g_uv_buffer_data, GL_STATIC_DRAW);
-
     GLuint vertexbuffer;
     glGenBuffers(1, &vertexbuffer);
     glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), g_vertex_buffer_data, GL_STATIC_DRAW);
 
+
+    // Foreground Triangle
+    static const GLfloat fg_vertex_buffer_data[] = {
+        -.33f,  -.33f, 1.0f,
+          0.0f,  .33f, 1.0f,
+         .33f,  -.33f, 1.0f,
+    };
+    GLuint fgvertexbuffer;
+    glGenBuffers(1, &fgvertexbuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, fgvertexbuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(fg_vertex_buffer_data), fg_vertex_buffer_data, GL_STATIC_DRAW);
 
     
     cv::Mat cur_webcam_image = getWebcamStill();
@@ -271,25 +296,15 @@ int main (int argc, char** argv) {
         // capture a new webcam image
         cur_webcam_image = getWebcamStill();
 
-        // thread 1 tracks newest webcam image and outputs transforms for OpenGL
-        //thread first (trackLatestImage, ref(cur_webcam_image));
-
-        // thread 2 renders previous webcam image with overlayed 3D
-        // TODO fix this thread, it's seg faulting
-        // thread second (renderOpenGLFrame,
-        //                ref(programID), ref(MatrixID),
-        //                ref(prev_webcam_image), ref(TextureID),
-        //                ref(vertexbuffer), ref(uvbuffer),
-        //                ref(MVP));
-        renderOpenGLFrame(programID, MatrixID,
+        // TODO thread 1 tracks cur_webcam_image
+        // TODO thread 2 renders iamge with 3D overlay
+        renderOpenGLFrame(programID, persp_programID,
+                          MatrixID, persp_MatrixID,
                           prev_webcam_image, TextureID,
                           vertexbuffer, uvbuffer,
-                          MVP);
-
-        // synchronize threads, display prev image, repeat with newest image
-        // second.join();
-        // first.join();
-
+                          fgvertexbuffer,
+                          ortho_MVP, persp_MVP);
+        // synchronize threads
     } // Check if the ESC key was pressed or the window was closed
     while( glfwGetKey(window, GLFW_KEY_ESCAPE ) != GLFW_PRESS &&
            glfwWindowShouldClose(window) == 0 );
@@ -298,6 +313,7 @@ int main (int argc, char** argv) {
     // Cleanup
     glDeleteBuffers(1, &uvbuffer);
     glDeleteBuffers(1, &vertexbuffer);
+    glDeleteBuffers(1, &fgvertexbuffer);
     glDeleteProgram(programID);
     glDeleteTextures(1, &Texture);
     glDeleteVertexArrays(1, &VertexArrayID);
