@@ -4,6 +4,7 @@
 #include <vector>
 #include <iomanip>
 #include <thread>
+#include <chrono>
 #include <opencv2/opencv.hpp>
 using namespace cv;
 #include <GL/glew.h> // include before gl.h and glfw.h
@@ -59,24 +60,69 @@ GLuint cvMatToGLuint(cv::Mat& input_mat) {
 }
 
 
-int trackLatestImage(cv::Mat& webcam_image) {
+// TODO properly integrate these funcs
+void cvtKeyPtoP(vector<KeyPoint>& kpts, vector<Point2f>& points) {
+    points.clear();
+    for (unsigned int i=0; i<kpts.size(); i++) points.push_back(kpts[i].pt);
+}
+void cvtPtoKpts(vector<KeyPoint>& kpts, vector<Point2f>& points) {
+    kpts.clear();
+    for (unsigned int i=0; i<points.size(); i++) kpts.push_back(KeyPoint(points[i],1));
+}
+
+// void getPlanarSurface(vector<Point2f>& imgP) {    
+//     Rodrigues(rotM,rvec);
+     
+//     solvePnP(objPM, Mat(imgP), camera_matrix, distortion_coefficients, rvec, tvec, true);
+     
+//     Rodrigues(rvec,rotM);
+// }
+// end TODO
+
+int trackLatestImage(cv::Mat prev_webcam_image, cv::Mat cur_webcam_image) {
     // Detect 8x8 chessboard pattern, 7x7 internal points
-    Size pattern = Size (7, 7); 
-    vector<Point2f> corners;
-    findChessboardCorners(webcam_image, pattern, corners, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
+    Size pattern = Size (7, 7);
+    vector<Point2f> points1;
+    vector<Point2f> points2;
+
+    // // TODO see if converting to black n white speeds the solve up
+    cvtColor(cur_webcam_image, cur_webcam_image, CV_BGR2GRAY);
+
+    // findChessboardCorners(prev_webcam_image, pattern, points1, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
+    // + CALIB_CB_FAST_CHECK);
+    findChessboardCorners(cur_webcam_image, pattern, points2, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
     + CALIB_CB_FAST_CHECK);
 
+    // Draw the internal checkerboard points
+    cvtColor(cur_webcam_image, cur_webcam_image, CV_GRAY2BGR);
     Scalar color = Scalar(0, 0, 255); // pure red
-    for (auto p : corners) {
-        Rect rect(p.x - 2, p.y - 2, 5, 5);
-        rectangle(webcam_image, rect, color, 2, LINE_8, 0);
+    for (auto p : points2) {
+        Rect rect(p.x - 3, p.y - 3, 7, 7);
+        rectangle(cur_webcam_image, rect, color, 2, LINE_8, 0);
     }
 
-    // Display Result
-    //imshow("Camera Output", webcam_image);
-    //if (waitKey(30) >= 0) break; // break on keystroke
 
     // TODO Change return type from int to solved transform matrix for OpenGL
+    //calc optical flow
+    // vector<KeyPoint> imgPointsOnPlane;
+    // vector<uchar> status;
+    // vector<float> track_error;
+    // calcOpticalFlowPyrLK(prev_webcam_image, cur_webcam_image, points1, points2, status, track_error, Size(30,30));
+    // cvtPtoKpts(imgPointsOnPlane, points2);
+
+    // //switch points vectors (next becomes previous)
+    // points1.clear();
+    // points1 = points2;
+     
+    // //calculate camera pose
+    // //getPlanarSurface(points1);
+
+    // drawKeypoints(cur_webcam_image, imgPointsOnPlane, cur_webcam_image, Scalar(255));
+    // end TODO
+
+    // // Display Result
+    imshow("cvWindow", cur_webcam_image);
+    waitKey(30);
     return 0;
 }
 
@@ -127,11 +173,11 @@ int setupGLFWWindow() {
 
 
 int renderOpenGLFrame(GLuint& programID, GLuint& persp_programID,
-                       GLuint& MatrixID, GLuint& persp_MatrixID,
-                       cv::Mat& webcam_image, GLuint& TextureID,
-                       GLuint& vertexbuffer, GLuint& uvbuffer,
-                       GLuint& fgbuffer, GLuint& fgcolorbuffer,
-                       glm::mat4& ortho_MVP, glm::mat4& persp_MVP) {
+                      GLuint& MatrixID, GLuint& persp_MatrixID,
+                      cv::Mat& webcam_image, GLuint& TextureID,
+                      GLuint& vertexbuffer, GLuint& uvbuffer,
+                      GLuint& fgbuffer, GLuint& fgcolorbuffer,
+                      glm::mat4& ortho_MVP, glm::mat4& persp_MVP) {
     // convert webcam_image for OpenGL texture
     GLuint Texture = cvMatToGLuint(webcam_image);
 
@@ -290,6 +336,7 @@ int main (int argc, char** argv) {
 
 
     // Foreground Cube
+    // TODO make colors match corners
     static const GLfloat fg_vertex_buffer_data[] = {
         -1.0f,-1.0f,-1.0f, // triangle 1 : begin
         -1.0f,-1.0f, 1.0f,
@@ -379,20 +426,22 @@ int main (int argc, char** argv) {
     cv::Mat cur_webcam_image = getWebcamStill();
     cv::Mat prev_webcam_image;
     GLuint Texture;
+    namedWindow("cvWindow", WINDOW_NORMAL);
     do{
-        prev_webcam_image = cur_webcam_image;
         // capture a new webcam image
+        prev_webcam_image = cur_webcam_image;
         cur_webcam_image = getWebcamStill();
 
-        // TODO thread 1 tracks cur_webcam_image
-        // TODO thread 2 renders iamge with 3D overlay
+        // TODO multithread for speed?
+
+        trackLatestImage(prev_webcam_image, cur_webcam_image);
+
         renderOpenGLFrame(programID, persp_programID,
                           MatrixID, persp_MatrixID,
                           prev_webcam_image, TextureID,
                           vertexbuffer, uvbuffer,
                           fgvertexbuffer, fgcolorbuffer,
                           ortho_MVP, persp_MVP);
-        // synchronize threads
     } // Check if the ESC key was pressed or the window was closed
     while( glfwGetKey(window, GLFW_KEY_ESCAPE ) != GLFW_PRESS &&
            glfwWindowShouldClose(window) == 0 );
