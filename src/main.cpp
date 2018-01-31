@@ -70,14 +70,45 @@ void cvtPtoKpts(vector<KeyPoint>& kpts, vector<Point2f>& points) {
     for (unsigned int i=0; i<points.size(); i++) kpts.push_back(KeyPoint(points[i],1));
 }
 
-// void getPlanarSurface(vector<Point2f>& imgP) {    
-//     Rodrigues(rotM,rvec);
-     
-//     solvePnP(objPM, Mat(imgP), camera_matrix, distortion_coefficients, rvec, tvec, true);
-     
-//     Rodrigues(rvec,rotM);
-// }
-// end TODO
+
+// TODO resolve globals
+double camD[] = {6.7649431228632795e+02, 0., 3.8262188058832749e+02, 0.,
+    5.9941193806780484e+02, 1.6894241981264270e+02, 0., 0., 1.};
+double distCoeffD[] = {5.5318827974857022e-02, -1.0129523116603711e+00,
+    3.8895464611792836e-02, 2.5365684020675693e-02,
+    2.6020235726385716e+00, 0., 0., 8.1013197871984710e-01};
+Mat camera_matrix = Mat(3,3,CV_64FC1,camD);
+Mat distortion_coefficients = Mat(5,1,CV_64FC1,distCoeffD);
+Mat objPM;
+vector<Point3d> objP;
+vector<double> rv(3), tv(3);
+Mat rvec(rv),tvec(tv); 
+double _d[9] = {1,  0,  0,
+    0,  -1, 0,
+    0,  0,  -1}; //rotation: looking at -x axis
+vector<KeyPoint> imgPointsOnPlane;
+vector<uchar> status;
+vector<float> track_error;
+Mat rotM(3,3,CV_64FC1,_d);
+double theta = 0.0,theta1 = 0.0,theta2 = 0.0,phi = 0.0,phi1 = 0.0,phi2 = 0.0,psi = 0.0,psi1 = 0.0,psi2 = 0.0;
+
+
+void getPlanarSurface(vector<Point2f>& imgP) {    
+    Rodrigues(rotM,rvec);
+
+    // TODO moe this elsewhere
+    objP.clear();
+    objP.push_back(Point3d(0,0,0));
+    objP.push_back(Point3d(5,0,0));
+    objP.push_back(Point3d(5,5,0));
+    objP.push_back(Point3d(0,5,0));
+    Mat(objP).convertTo(objPM,CV_32F);
+
+    solvePnP(objPM, Mat(imgP), camera_matrix, distortion_coefficients, rvec, tvec, true);
+
+    Rodrigues(rvec,rotM);
+}
+
 
 int trackLatestImage(cv::Mat prev_webcam_image, cv::Mat cur_webcam_image) {
     // Detect 8x8 chessboard pattern, 7x7 internal points
@@ -85,40 +116,55 @@ int trackLatestImage(cv::Mat prev_webcam_image, cv::Mat cur_webcam_image) {
     vector<Point2f> points1;
     vector<Point2f> points2;
 
-    // // TODO see if converting to black n white speeds the solve up
+    // Converting to black and white so points show up better later
     cvtColor(cur_webcam_image, cur_webcam_image, CV_BGR2GRAY);
 
-    // findChessboardCorners(prev_webcam_image, pattern, points1, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
-    // + CALIB_CB_FAST_CHECK);
+    findChessboardCorners(prev_webcam_image, pattern, points1, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
+    + CALIB_CB_FAST_CHECK);
     findChessboardCorners(cur_webcam_image, pattern, points2, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
     + CALIB_CB_FAST_CHECK);
 
-    // Draw the internal checkerboard points
+    // Convert to color so red points show up
     cvtColor(cur_webcam_image, cur_webcam_image, CV_GRAY2BGR);
-    Scalar color = Scalar(0, 0, 255); // pure red
-    for (auto p : points2) {
-        Rect rect(p.x - 3, p.y - 3, 7, 7);
-        rectangle(cur_webcam_image, rect, color, 2, LINE_8, 0);
-    }
 
-
-    // TODO Change return type from int to solved transform matrix for OpenGL
     //calc optical flow
-    // vector<KeyPoint> imgPointsOnPlane;
-    // vector<uchar> status;
-    // vector<float> track_error;
-    // calcOpticalFlowPyrLK(prev_webcam_image, cur_webcam_image, points1, points2, status, track_error, Size(30,30));
-    // cvtPtoKpts(imgPointsOnPlane, points2);
+    if (points1.size() == 0 || points2.size() == 0) {
+        // we didn't track the points
+        cout << "unable to track...\n";
+        // TODO handle this without failing, use prev points possibly
+    }
+    else {
+        // TODO cleanup this, take the 4 corner points from checkerboard
+        vector<Point2f> tmp1;
+        tmp1.push_back(points1[0]);
+        tmp1.push_back(points1[6]);
+        tmp1.push_back(points1[42]);
+        tmp1.push_back(points1[48]);
+        vector<Point2f> tmp2;
+        tmp2.push_back(points2[0]);
+        tmp2.push_back(points2[6]);
+        tmp2.push_back(points2[42]);
+        tmp2.push_back(points2[48]);
+        points1 = tmp1;
+        points2 = tmp2;
 
-    // //switch points vectors (next becomes previous)
-    // points1.clear();
-    // points1 = points2;
-     
-    // //calculate camera pose
-    // //getPlanarSurface(points1);
 
-    // drawKeypoints(cur_webcam_image, imgPointsOnPlane, cur_webcam_image, Scalar(255));
-    // end TODO
+        calcOpticalFlowPyrLK(prev_webcam_image, cur_webcam_image, points1, points2, status, track_error, Size(30,30));
+
+        cvtPtoKpts(imgPointsOnPlane, points2);
+
+        //switch points vectors (next becomes previous)
+        points1.clear();
+        points1 = points2;
+         
+        //calculate camera pose
+        getPlanarSurface(points1);
+
+        for (auto p : points2) {
+            Rect rect(p.x - 3, p.y - 3, 7, 7);
+            rectangle(cur_webcam_image, rect, Scalar(0, 0, 255), 2, LINE_8, 0);
+        }
+    }
 
     // // Display Result
     imshow("cvWindow", cur_webcam_image);
