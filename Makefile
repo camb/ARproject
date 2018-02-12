@@ -1,6 +1,6 @@
 .PHONY: all init clean
 CXX = g++
-CXXFLAGS = -std=c++0x -Wall -pthread
+CXXFLAGS = -std=c++0x -Wall
 LDLIBS = `pkg-config --libs --cflags opencv` -lGLEW -lm -lGL -lGLU -lglfw -lglut
 
 SRC_DIR = src

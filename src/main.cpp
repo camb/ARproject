@@ -1,33 +1,25 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <iostream>
-#include <vector>
-#include <iomanip>
-#include <thread>
-#include <chrono>
-#include <opencv2/opencv.hpp>
-using namespace cv;
-#include <GL/glew.h> // include before gl.h and glfw.h
+#include <GL/glew.h>
 #include <GLFW/glfw3.h>
-GLFWwindow* window;  // TODO: fix global var
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-using namespace glm;
+#include <glm/gtx/string_cast.hpp>  // for printing glm matices
+#include <iostream>
+#include <opencv2/opencv.hpp>
+#include <opencv/highgui.h> // needed for distortion tutorial
+#include <stdio.h>
+#include <stdlib.h>
+#include <vector>
 #include "shader.hpp"
-using namespace std;
 
 
 cv::Mat getWebcamStill() {
-    // read in a single webcam frame
-    VideoCapture webcam(0);
-    // Set windows resolution
-    webcam.set(CAP_PROP_FRAME_HEIGHT, 720);
-    webcam.set(CAP_PROP_FRAME_WIDTH, 1280);
+    cv::VideoCapture webcam(0);
+    webcam.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+    webcam.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
     // Set codec to YUYV to avoid MJPG corrupt JPEG warnings
-    webcam.set(CAP_PROP_FOURCC, CV_FOURCC('Y', 'U', 'Y', 'V'));
-    Mat webcam_image;
+    webcam.set(cv::CAP_PROP_FOURCC, CV_FOURCC('Y', 'U', 'Y', 'V'));
+    cv::Mat webcam_image;
     webcam.read(webcam_image);
-
     return webcam_image;
 }
 
@@ -45,131 +37,161 @@ GLuint cvMatToGLuint(cv::Mat& input_mat) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 
-
     glTexImage2D(GL_TEXTURE_2D,     // Type of texture
                  0,                 // Pyramid level (for mip-mapping) - 0 is the top level
                  GL_RGB,            // Internal colour format to convert to
-                 input_mat.cols,          // Image width  i.e. 640 for Kinect in standard mode
-                 input_mat.rows,          // Image height i.e. 480 for Kinect in standard mode
+                 input_mat.cols,    // Image width  i.e. 640 for Kinect in standard mode
+                 input_mat.rows,    // Image height i.e. 480 for Kinect in standard mode
                  0,                 // Border width in pixels (can either be 1 or 0)
-                 GL_BGR, // Input image format (i.e. GL_RGB, GL_RGBA, GL_BGR etc.)
+                 GL_BGR,            // Input image format (i.e. GL_RGB, GL_RGBA, GL_BGR etc.)
                  GL_UNSIGNED_BYTE,  // Image data type
-                 input_mat.ptr());        // The actual image data itself
+                 input_mat.ptr());  // The actual image data itself
 
     return textureID;
 }
 
 
-// TODO properly integrate these funcs
-void cvtKeyPtoP(vector<KeyPoint>& kpts, vector<Point2f>& points) {
-    points.clear();
-    for (unsigned int i=0; i<kpts.size(); i++) points.push_back(kpts[i].pt);
-}
-void cvtPtoKpts(vector<KeyPoint>& kpts, vector<Point2f>& points) {
-    kpts.clear();
-    for (unsigned int i=0; i<points.size(); i++) kpts.push_back(KeyPoint(points[i],1));
-}
-
-
 // TODO resolve globals
+GLFWwindow* window;  // TODO: fix global var
+
 double camD[] = {6.7649431228632795e+02, 0., 3.8262188058832749e+02, 0.,
-    5.9941193806780484e+02, 1.6894241981264270e+02, 0., 0., 1.};
+     5.9941193806780484e+02, 1.6894241981264270e+02, 0., 0., 1.};
 double distCoeffD[] = {5.5318827974857022e-02, -1.0129523116603711e+00,
     3.8895464611792836e-02, 2.5365684020675693e-02,
     2.6020235726385716e+00, 0., 0., 8.1013197871984710e-01};
-Mat camera_matrix = Mat(3,3,CV_64FC1,camD);
-Mat distortion_coefficients = Mat(5,1,CV_64FC1,distCoeffD);
-Mat objPM;
-vector<Point3d> objP;
-vector<double> rv(3), tv(3);
-Mat rvec(rv),tvec(tv); 
-double _d[9] = {1,  0,  0,
-    0,  -1, 0,
-    0,  0,  -1}; //rotation: looking at -x axis
-vector<KeyPoint> imgPointsOnPlane;
-vector<uchar> status;
-vector<float> track_error;
-Mat rotM(3,3,CV_64FC1,_d);
-double theta = 0.0,theta1 = 0.0,theta2 = 0.0,phi = 0.0,phi1 = 0.0,phi2 = 0.0,psi = 0.0,psi1 = 0.0,psi2 = 0.0;
+cv::Mat camera_matrix = cv::Mat(3,3,CV_64FC1,camD);
+cv::Mat dist_coeff = cv::Mat(5,1,CV_64FC1,distCoeffD);
+cv::Mat obj_pts_mtrx;
+std::vector<cv::Point3d> obj_pts;
+std::vector<double> rv(3), tv(3);
+cv::Mat rvec(rv),tvec(tv);
+double _d[9] = {1,   0,   0,
+                0,  -1,   0,
+                0,   0,  -1}; //rotation: looking at -x axis
+std::vector<uchar> status;
+std::vector<float> track_error;
+cv::Mat rotM(3,3,CV_64FC1,_d);
+glm::mat4 GLMView;
 
 
-void getPlanarSurface(vector<Point2f>& imgP) {    
-    Rodrigues(rotM,rvec);
+void solveViewMatrix(std::vector<cv::Point2f>& corners) {
+    // TODO fix calibrating camera
+    std::cout << "precalib camera matrix:\n" << camera_matrix << std::endl << std::endl;
+    // TODO fix crashing and resolve intrinsic camera properties: camera matrix & distortion
+    cv::calibrateCamera(obj_pts, corners, cv::Size(1280, 720), camera_matrix, dist_coeff, rvec, tvec, 0);
+    std::cout << "postcalib camera matrix:\n" << camera_matrix << std::endl << std::endl;
+    return;
 
-    // TODO moe this elsewhere
-    objP.clear();
-    objP.push_back(Point3d(0,0,0));
-    objP.push_back(Point3d(5,0,0));
-    objP.push_back(Point3d(5,5,0));
-    objP.push_back(Point3d(0,5,0));
-    Mat(objP).convertTo(objPM,CV_32F);
+    cv::Rodrigues(rotM, rvec);
 
-    solvePnP(objPM, Mat(imgP), camera_matrix, distortion_coefficients, rvec, tvec, true);
+    cv::solvePnP(obj_pts_mtrx, cv::Mat(corners), camera_matrix, dist_coeff, rvec, tvec, false);
 
-    Rodrigues(rvec,rotM);
-}
+    cv::Rodrigues(rvec, rotM);
 
+    rotM = rotM.t();
+    tvec = -rotM * tvec;
 
-int trackLatestImage(cv::Mat prev_webcam_image, cv::Mat cur_webcam_image) {
-    // Detect 8x8 chessboard pattern, 7x7 internal points
-    Size pattern = Size (7, 7);
-    vector<Point2f> points1;
-    vector<Point2f> points2;
+    // setup 4x4 CV formatted View matrix in the object frame
+    cv::Mat cvView(4, 4, rotM.type()); // cvView is 4x4
+    cvView( cv::Range(0,3), cv::Range(0,3) ) = rotM * 1; // copies R into cvView
+    cvView( cv::Range(0,3), cv::Range(3,4) ) = tvec * 1; // copies tvec into cvView
+    // fill the last row of cvView (NOTE: depending on your types, use float or double)
+    double *p = cvView.ptr<double>(3);
+    p[0] = p[1] = p[2] = 0; p[3] = 1;
 
-    // Converting to black and white so points show up better later
-    cvtColor(cur_webcam_image, cur_webcam_image, CV_BGR2GRAY);
-
-    findChessboardCorners(prev_webcam_image, pattern, points1, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
-    + CALIB_CB_FAST_CHECK);
-    findChessboardCorners(cur_webcam_image, pattern, points2, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
-    + CALIB_CB_FAST_CHECK);
-
-    // Convert to color so red points show up
-    cvtColor(cur_webcam_image, cur_webcam_image, CV_GRAY2BGR);
-
-    //calc optical flow
-    if (points1.size() == 0 || points2.size() == 0) {
-        // we didn't track the points
-        cout << "unable to track...\n";
-        // TODO handle this without failing, use prev points possibly
-    }
-    else {
-        // TODO cleanup this, take the 4 corner points from checkerboard
-        vector<Point2f> tmp1;
-        tmp1.push_back(points1[0]);
-        tmp1.push_back(points1[6]);
-        tmp1.push_back(points1[42]);
-        tmp1.push_back(points1[48]);
-        vector<Point2f> tmp2;
-        tmp2.push_back(points2[0]);
-        tmp2.push_back(points2[6]);
-        tmp2.push_back(points2[42]);
-        tmp2.push_back(points2[48]);
-        points1 = tmp1;
-        points2 = tmp2;
-
-
-        calcOpticalFlowPyrLK(prev_webcam_image, cur_webcam_image, points1, points2, status, track_error, Size(30,30));
-
-        cvtPtoKpts(imgPointsOnPlane, points2);
-
-        //switch points vectors (next becomes previous)
-        points1.clear();
-        points1 = points2;
-         
-        //calculate camera pose
-        getPlanarSurface(points1);
-
-        for (auto p : points2) {
-            Rect rect(p.x - 3, p.y - 3, 7, 7);
-            rectangle(cur_webcam_image, rect, Scalar(0, 0, 255), 2, LINE_8, 0);
+    // converting the OpenCV View matrix to glm matrix?
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            GLMView[j][i] = cvView.at<double>(i, j);
         }
     }
 
-    // // Display Result
-    imshow("cvWindow", cur_webcam_image);
-    waitKey(30);
+    // OpenCV are stored in row-major order to OpenGL ones, in column-major order
+    // GLMView = glm::transpose(GLMView);
+
+    // cvView is your 4x4 matrix in the OpenCV frame
+    glm::rotate(GLMView, 180.0f, glm::vec3(1.0, 0.0, 0.0));
+    glm::rotate(GLMView, 180.0f, glm::vec3(0.0, 0.0, 1.0));
+
+
+    // TODO Debugging => Camera matrix
+    GLMView  = glm::lookAt(glm::vec3(0,5,0), // Camera is at (0,0,3), in World Space
+                           glm::vec3(0,0,0), // and looks at the origin
+                           glm::vec3(0,0,-1)  // Head is up (set to 0,-1,0 to look upside-down)
+                          );
+    // std::cout << "GLM Matrix:\n:" << to_string(GLMView) << std::endl << std::endl;
+}
+
+
+int solveCameraView(cv::Mat prev_img, cv::Mat next_img) {
+    static std::vector<cv::Point2f> next_corners;
+    // static std::vector<cv::Point2f> prev_corners;
+    std::vector<cv::Point2f> next_pts;
+    // std::vector<cv::Point2f prev_pts;
+    cv::cvtColor(next_img, next_img, CV_BGR2GRAY);
+
+    bool found_next = cv::findChessboardCorners(next_img, cv::Size(7, 7), next_pts, cv::CALIB_CB_ADAPTIVE_THRESH + cv::CALIB_CB_NORMALIZE_IMAGE
+                      						    + cv::CALIB_CB_FAST_CHECK);
+    if (found_next) {
+        next_corners = {next_pts[0], next_pts[6], next_pts[42], next_pts[48]};
+        // Convert to color so red points show up
+        cv::cvtColor(next_img, next_img, CV_GRAY2BGR);
+        // Draw corners in CV GLFW window
+        for (auto p : next_corners)
+            cv::rectangle(next_img, cv::Rect(p.x-3, p.y-3, 7, 7), cv::Scalar(0, 0, 255), 2, cv::LINE_8, 0);
+
+        solveViewMatrix(next_corners);
+    }
+    // Display image
+    cv::imshow("cvWindow", next_img);
+    cv::waitKey(30);
     return 0;
+    { // contained code is only needed for calc optical flow func
+        // Track chessboards as needed
+        // bool found_prev = false;
+        // if (prev_corners.empty() && next_corners.empty()) {
+        //     found_prev = findChessboardCorners(prev_img, cv::Size(7, 7), prev_pts, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
+        //                           + CALIB_CB_FAST_CHECK);
+        //     if (found_prev)
+        //         prev_corners = {prev_pts[0], prev_pts[6], prev_pts[42], prev_pts[48]};
+        // }
+        // else if (!next_corners.empty()) {
+        //     prev_corners = next_corners;
+        // }
+        // bool found_next = findChessboardCorners(next_img, cv::Size(7, 7), next_pts, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE
+        //                   + CALIB_CB_FAST_CHECK);
+        // if (found_next)
+        //     next_corners = {next_pts[0], next_pts[6], next_pts[42], next_pts[48]};
+
+        // // Convert to color so red points show up
+        // cvtColor(next_img, next_img, CV_GRAY2BGR);
+
+        // if (prev_corners.empty() || next_corners.empty()) {
+        //     // TODO improve handling if it didn't track the points
+        //     std::cout << "unable to track...\n";
+        // }
+        // else {
+        //     // TODO Integrate calculate optical flow if needed
+        //     // calcOpticalFlowPyrLK(prev_img, next_img,
+        //     //                      prev_corners, next_corners,
+        //     //                      status, track_error, cv::Size(30,30));
+
+        //     // Switch points vectors (next becomes previous)
+        //     prev_corners = next_corners;
+        //     next_corners.clear();
+
+        //     // Draw corners in CV GLFW window
+        //     for (auto p : prev_corners)
+        //         rectangle(next_img, Rect(p.x-3, p.y-3, 7, 7), Scalar(0, 0, 255), 2, LINE_8, 0);
+             
+        //     // Calculate camera View matrix
+        //     solveViewMatrix(prev_corners);
+
+        // // // Display Image
+        // imshow("cvWindow", next_img);
+        // waitKey(30);
+        // return 0;
+    }
 }
 
 
@@ -177,7 +199,7 @@ int setupGLFWWindow() {
     // Initialise GLFW
     if( !glfwInit() )
     {
-        fprintf( stderr, "Failed to initialize GLFW\n" );
+        fprintf(stderr, "Failed to initialize GLFW\n" );
         getchar();
         return -1;
     }
@@ -188,9 +210,9 @@ int setupGLFWWindow() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     // Open a window and create its OpenGL context
-    window = glfwCreateWindow( 1280, 720, "GLFW Window", NULL, NULL);
+    window = glfwCreateWindow(1280, 720, "GLFW Window", NULL, NULL);
     if( window == NULL ){
-        fprintf( stderr, "Failed to open GLFW window.\n" );
+        fprintf(stderr, "Failed to open GLFW window.\n");
         getchar();
         glfwTerminate();
         return -1;
@@ -207,7 +229,7 @@ int setupGLFWWindow() {
     // Ensure we can capture the escape key being pressed below
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GL_TRUE);
 
-    // background, possibly unnecessary
+    // Set background color to black
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
     // Enable depth test
@@ -218,67 +240,68 @@ int setupGLFWWindow() {
 }
 
 
-int renderOpenGLFrame(GLuint& programID, GLuint& persp_programID,
-                      GLuint& MatrixID, GLuint& persp_MatrixID,
+int render3D(GLuint& ProgramID, GLuint& PerspProgramID,
+                      GLuint& OrthoMatrixID, GLuint& PerspMatrixID,
                       cv::Mat& webcam_image, GLuint& TextureID,
                       GLuint& vertexbuffer, GLuint& uvbuffer,
                       GLuint& fgbuffer, GLuint& fgcolorbuffer,
-                      glm::mat4& ortho_MVP, glm::mat4& persp_MVP) {
-    // convert webcam_image for OpenGL texture
-    GLuint Texture = cvMatToGLuint(webcam_image);
+                      glm::mat4& OrthoMVP, glm::mat4& PerspMVP)
+{
+    { // Draw BG plate
+        // convert webcam_image for OpenGL texture
+        GLuint Texture = cvMatToGLuint(webcam_image);
+        // Clear the screen
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Clear the screen
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        // Use shader
+        glUseProgram(ProgramID);
 
-    // Use our shader
-    glUseProgram(programID);
+        // Send transformation to the currently bound shader, 
+        // in the "MVP" uniform
+        glUniformMatrix4fv(OrthoMatrixID, 1, GL_FALSE, &OrthoMVP[0][0]);
 
-    // Send our transformation to the currently bound shader, 
-    // in the "MVP" uniform
-    glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &ortho_MVP[0][0]);
+        // Bind texture in Texture Unit 0
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, Texture);
+        // Set "myTextureSampler" sampler to use Texture Unit 0
+        glUniform1i(TextureID, 0);
 
-    // Bind our texture in Texture Unit 0
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, Texture);
-    // Set our "myTextureSampler" sampler to use Texture Unit 0
-    glUniform1i(TextureID, 0);
+        // 1st attribute buffer : vertices
+        glEnableVertexAttribArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
+        glVertexAttribPointer(
+            0,                  // attribute 0. No particular reason for 0, but must match the layout in the shader.
+            3,                  // size
+            GL_FLOAT,           // type
+            GL_FALSE,           // normalized?
+            0,                  // stride
+            (void*)0            // array buffer offset
+        );
+        // 2nd attribute buffer : UVs
+        glEnableVertexAttribArray(1);
+        glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
+        glVertexAttribPointer(
+            1,                                // attribute. No particular reason for 1, but must match the layout in the shader.
+            2,                                // size : U+V => 2
+            GL_FLOAT,                         // type
+            GL_FALSE,                         // normalized?
+            0,                                // stride
+            (void*)0                          // array buffer offset
+        );
 
-    // 1st attribute buffer : vertices
-    glEnableVertexAttribArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
-    glVertexAttribPointer(
-        0,                  // attribute 0. No particular reason for 0, but must match the layout in the shader.
-        3,                  // size
-        GL_FLOAT,           // type
-        GL_FALSE,           // normalized?
-        0,                  // stride
-        (void*)0            // array buffer offset
-    );
-    // 2nd attribute buffer : UVs
-    glEnableVertexAttribArray(1);
-    glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
-    glVertexAttribPointer(
-        1,                                // attribute. No particular reason for 1, but must match the layout in the shader.
-        2,                                // size : U+V => 2
-        GL_FLOAT,                         // type
-        GL_FALSE,                         // normalized?
-        0,                                // stride
-        (void*)0                          // array buffer offset
-    );
-
-    // Draw the BG triangles
-    glDrawArrays(GL_TRIANGLES, 0, 2*3);
-    glDisableVertexAttribArray(0);
-    glDisableVertexAttribArray(1);
-
+        // Draw the BG triangles
+        glDrawArrays(GL_TRIANGLES, 0, 2*3);
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+    }
 
     // Draw the FG triangle
     // Clear the depth buffer
     glClear(GL_DEPTH_BUFFER_BIT);
     // Use a the FG shader
-    glUseProgram(persp_programID);
+    glUseProgram(PerspProgramID);
     // Use the persp matrix
-    glUniformMatrix4fv(persp_MatrixID, 1, GL_FALSE, &persp_MVP[0][0]);
+    glUniformMatrix4fv(PerspMatrixID, 1, GL_FALSE, &PerspMVP[0][0]);
 
     glEnableVertexAttribArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, fgbuffer);
@@ -322,35 +345,34 @@ int main (int argc, char** argv) {
     glBindVertexArray(VertexArrayID);
 
     // Create and compile our GLSL program from the shaders
-    GLuint programID = LoadShaders("shaders/SimpleVertexShader.vertexshader",
-                                   "shaders/SimpleFragmentShader.fragmentshader");
-
-    GLuint persp_programID = LoadShaders("shaders/SimpleVertexShader_persp.vertexshader",
-                                         "shaders/SimpleFragmentShader_persp.fragmentshader");
+    GLuint ProgramID = LoadShaders("shaders/BGPlate.vertexshader",
+                                   "shaders/BGPlate.fragmentshader");
+    GLuint PerspProgramID = LoadShaders("shaders/Cube.vertexshader",
+                                        "shaders/Cube.fragmentshader");
 
     // Get a handle for our "MVP" uniform
-    GLuint MatrixID = glGetUniformLocation(programID, "MVP");
-    GLuint persp_MatrixID = glGetUniformLocation(persp_programID, "persp_MVP");
-    // Old persp Projection: 45° Field of View, 4:3 ratio, dist: 0.1 to 100 units
-    glm::mat4 persp_Projection = glm::perspective(glm::radians(45.0f), 4.0f / 3.0f, 0.1f, 100.0f);
-    // ortho projection matrix for the background plate
-    glm::mat4 ortho_Projection = glm::ortho(-1.0f, 1.0f,    // left,   right
-                                            -1.0f, 1.0f,    // bottom, top
-                                             0.1f, 100.0f);  // near,   far
+    GLuint OrthoMatrixID = glGetUniformLocation(ProgramID, "MVP");
+    GLuint PerspMatrixID = glGetUniformLocation(PerspProgramID, "PerspMVP");
+    // Persp Projection: 30° Field of View, 16:9 ratio, dist: 0.1 to 1000 units
+    glm::mat4 PerspProj = glm::perspective(glm::radians(30.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
+    // std::cout << "PerspProj: \n" << to_string(PerspProj) << std::endl << std::endl;
+    // Ortho projection matrix for the background plate
+    glm::mat4 OrthoProj = glm::ortho(-1.0f, 1.0f,    // left,   right
+                                     -1.0f, 1.0f,    // bottom, top
+                                      0.1f, 100.0f); // near,   far
     // Camera matrix
-    glm::mat4 View  = glm::lookAt(
-                        glm::vec3(0,0,5), // Camera is at (0,0,3), in World Space
-                        glm::vec3(0,0,0), // and looks at the origin
-                        glm::vec3(0,1,0)  // Head is up (set to 0,-1,0 to look upside-down)
-                      );
+    glm::mat4 View  = glm::lookAt(glm::vec3(0,0,5), // Camera is at (0,0,3), in World Space
+                                  glm::vec3(0,0,0), // and looks at the origin
+                                  glm::vec3(0,1,0)  // Head is up (set to 0,-1,0 to look upside-down)
+                                 );
     // Model matrix : an identity matrix (model will be at the origin)
     glm::mat4 Model = glm::mat4(1.0f);
     // Our ModelViewProjection : multiplication of our 3 matrices
-    glm::mat4 ortho_MVP  = ortho_Projection * View * Model; // Remember, matrix multiplication is the other way around
-    glm::mat4 persp_MVP  = persp_Projection * View * Model; // Remember, matrix multiplication is the other way around
+    glm::mat4 OrthoMVP  = OrthoProj * View * Model; // Remember, matrix multiplication is the other way around
+    glm::mat4 PerspMVP  = PerspProj * View * Model; // Remember, matrix multiplication is the other way around
     
     // Get a handle for our "myTextureSampler" uniform
-    GLuint TextureID  = glGetUniformLocation(programID, "myTextureSampler");
+    GLuint TextureID  = glGetUniformLocation(ProgramID, "myTextureSampler");
 
     // Background plate quad of 2 triangles
     static const GLfloat g_vertex_buffer_data[] = {
@@ -382,44 +404,43 @@ int main (int argc, char** argv) {
 
 
     // Foreground Cube
-    // TODO make colors match corners
     static const GLfloat fg_vertex_buffer_data[] = {
-        -1.0f,-1.0f,-1.0f, // triangle 1 : begin
+        -1.0f,-1.0f,-1.0f,
         -1.0f,-1.0f, 1.0f,
-        -1.0f, 1.0f, 1.0f, // triangle 1 : end
-        1.0f, 1.0f,-1.0f, // triangle 2 : begin
+        -1.0f, 1.0f, 1.0f,
+         1.0f, 1.0f,-1.0f,
         -1.0f,-1.0f,-1.0f,
-        -1.0f, 1.0f,-1.0f, // triangle 2 : end
-        1.0f,-1.0f, 1.0f,
+        -1.0f, 1.0f,-1.0f,
+         1.0f,-1.0f, 1.0f,
         -1.0f,-1.0f,-1.0f,
-        1.0f,-1.0f,-1.0f,
-        1.0f, 1.0f,-1.0f,
-        1.0f,-1.0f,-1.0f,
+         1.0f,-1.0f,-1.0f,
+         1.0f, 1.0f,-1.0f,
+         1.0f,-1.0f,-1.0f,
         -1.0f,-1.0f,-1.0f,
         -1.0f,-1.0f,-1.0f,
         -1.0f, 1.0f, 1.0f,
         -1.0f, 1.0f,-1.0f,
-        1.0f,-1.0f, 1.0f,
+         1.0f,-1.0f, 1.0f,
         -1.0f,-1.0f, 1.0f,
         -1.0f,-1.0f,-1.0f,
         -1.0f, 1.0f, 1.0f,
         -1.0f,-1.0f, 1.0f,
-        1.0f,-1.0f, 1.0f,
-        1.0f, 1.0f, 1.0f,
-        1.0f,-1.0f,-1.0f,
-        1.0f, 1.0f,-1.0f,
-        1.0f,-1.0f,-1.0f,
-        1.0f, 1.0f, 1.0f,
-        1.0f,-1.0f, 1.0f,
-        1.0f, 1.0f, 1.0f,
-        1.0f, 1.0f,-1.0f,
+         1.0f,-1.0f, 1.0f,
+         1.0f, 1.0f, 1.0f,
+         1.0f,-1.0f,-1.0f,
+         1.0f, 1.0f,-1.0f,
+         1.0f,-1.0f,-1.0f,
+         1.0f, 1.0f, 1.0f,
+         1.0f,-1.0f, 1.0f,
+         1.0f, 1.0f, 1.0f,
+         1.0f, 1.0f,-1.0f,
         -1.0f, 1.0f,-1.0f,
-        1.0f, 1.0f, 1.0f,
+         1.0f, 1.0f, 1.0f,
         -1.0f, 1.0f,-1.0f,
         -1.0f, 1.0f, 1.0f,
-        1.0f, 1.0f, 1.0f,
+         1.0f, 1.0f, 1.0f,
         -1.0f, 1.0f, 1.0f,
-        1.0f,-1.0f, 1.0f
+         1.0f,-1.0f, 1.0f
     };
     static const GLfloat fg_color_buffer_data[] = {
         0.583f,  0.771f,  0.014f,
@@ -468,41 +489,51 @@ int main (int argc, char** argv) {
     glBindBuffer(GL_ARRAY_BUFFER, fgcolorbuffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(fg_color_buffer_data), fg_color_buffer_data, GL_STATIC_DRAW);
 
-    
-    cv::Mat cur_webcam_image = getWebcamStill();
-    cv::Mat prev_webcam_image;
+    // Setup object pattern
+    obj_pts.clear();
+    obj_pts.push_back(cv::Point3d(0,0,0));
+    obj_pts.push_back(cv::Point3d(5,0,0));
+    obj_pts.push_back(cv::Point3d(5,5,0));
+    obj_pts.push_back(cv::Point3d(0,5,0));
+    cv::Mat(obj_pts).convertTo(obj_pts_mtrx, CV_32F);
+
+
+    cv::Mat prev_img, next_img = getWebcamStill();
     GLuint Texture;
-    namedWindow("cvWindow", WINDOW_NORMAL);
+    cv::namedWindow("cvWindow", cv::WINDOW_NORMAL);
     do{
         // capture a new webcam image
-        prev_webcam_image = cur_webcam_image;
-        cur_webcam_image = getWebcamStill();
+        prev_img = next_img;
+        next_img = getWebcamStill();
 
-        // TODO multithread for speed?
+        solveCameraView(prev_img, next_img);
 
-        trackLatestImage(prev_webcam_image, cur_webcam_image);
+        // apply the solved View for the persp 3D render
+        // PerspMVP  = PerspProj * GLMView * Model;
 
-        renderOpenGLFrame(programID, persp_programID,
-                          MatrixID, persp_MatrixID,
-                          prev_webcam_image, TextureID,
-                          vertexbuffer, uvbuffer,
-                          fgvertexbuffer, fgcolorbuffer,
-                          ortho_MVP, persp_MVP);
+        // render the prev_image and FG 3D object
+        render3D(ProgramID, PerspProgramID,
+                 OrthoMatrixID, PerspMatrixID,
+                 prev_img, TextureID,
+                 vertexbuffer, uvbuffer,
+                 fgvertexbuffer, fgcolorbuffer,
+                 OrthoMVP, PerspMVP);
     } // Check if the ESC key was pressed or the window was closed
     while( glfwGetKey(window, GLFW_KEY_ESCAPE ) != GLFW_PRESS &&
            glfwWindowShouldClose(window) == 0 );
 
 
-    // Cleanup
+    // Cleanup gl assets
     glDeleteBuffers(1, &uvbuffer);
     glDeleteBuffers(1, &vertexbuffer);
     glDeleteBuffers(1, &fgvertexbuffer);
     glDeleteBuffers(1, &fgcolorbuffer);
-    glDeleteProgram(programID);
+    glDeleteProgram(ProgramID);
     glDeleteTextures(1, &Texture);
     glDeleteVertexArrays(1, &VertexArrayID);
 
     // Close OpenGL window and terminate GLFW
     glfwTerminate();
+
     return 0;
 }
